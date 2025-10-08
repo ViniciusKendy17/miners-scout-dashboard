@@ -1,0 +1,3 @@
+Spectral analysis system of compounds for the identification and quantification of elements in mixtures. It allows the selection of areas of interest in images and the analysis of spectral reflectance in different bands. Uses SVM (Support Vector Machine) to classify pixels and calculate the occurrence of elements, evaluating spatial homogeneity.
+
+https://gabriel-spinola.github.io/projects/spectral-analyzer/
