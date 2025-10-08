@@ -1,6 +1,10 @@
 
 # Miners Scouting Dashboard
 
+I also developed the app for the data collection, but unfortunately I cannot provide the code.
+
+---  
+
 The FRC Scouting Dashboard is a web-based platform designed to connect with a mobile scouting application.
 
 The mobile app is used during FRC competitions to collect real-time data about robots. All collected data is sent to this dashboard, where it is processed and analyzed to produce reports, synergy calculations, and rankings.
