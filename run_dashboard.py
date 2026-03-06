@@ -13,8 +13,8 @@ else:
 # Comando para executar o Streamlit
 cmd = [
     "streamlit", "run",
-    os.path.join(app_path, "dashboard.py"),
-    "--server.port=8501",
+    os.path.join(app_path, "dashboard_frc.py"),
+    "--server.port=8503",
     "--server.headless=true",
     "--browser.serverAddress=localhost",
     "--browser.gatherUsageStats=false"

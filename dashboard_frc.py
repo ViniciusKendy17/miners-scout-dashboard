@@ -6,6 +6,8 @@ import plotly.graph_objects as go
 import io
 import time
 import plotly.graph_objects as go
+from sqlalchemy import create_engine
+
 
 
 # Page configuration
@@ -30,14 +32,20 @@ POINTS_MAP = {
     'DEEP_CAGE': {'auto': 12, 'teleop': 12}
 }
 
+
 def conectar_ao_banco():
 
-    return pg.connect(
-        host=st.secrets["DB_HOST"],
-        user=st.secrets["DB_USER"],
-        password=st.secrets["DB_PASSWORD"],
-        database=st.secrets["DB_NAME"],
-        port= st.secrets["DB_PORT"]
+    # return pg.connect(
+    #     host=st.secrets["DB_HOST"],
+    #     user=st.secrets["DB_USER"],
+    #     password=st.secrets["DB_PASSWORD"],
+    #     database=st.secrets["DB_NAME"],
+    #     port=st.secrets["DB_PORT"]
+    # )
+
+    return create_engine(
+        f"postgresql+psycopg2://{st.secrets['DB_USER']}:{st.secrets['DB_PASSWORD']}@"
+        f"{st.secrets['DB_HOST']}:{st.secrets['DB_PORT']}/{st.secrets['DB_NAME']}"
     )
 
 @st.cache_data(ttl=600)  # Increase cache time to 10 minutes
@@ -60,8 +68,7 @@ def carregar_dados():
 
     # Load data into DataFrame
     df = pd.read_sql_query(query, conn)
-    conn.close()
-    
+
     return df
     
 @st.cache_data(ttl=600)    
@@ -72,206 +79,10 @@ def carregarClimb_dados():
     
     df = pd.read_sql_query(query, conn)
     
-    conn.close()
     
     return df
     
 
-@st.cache_data(ttl=600)
-def processar_dados(df):
-    # Transform phase_name to match POINTS_MAP keys if needed
-    phase_mapping = {
-        'CORAL L1': 'L1',
-        'CORAL L2': 'L2',
-        'CORAL L3': 'L3',
-        'CORAL L4': 'L4',
-        'BARGE': 'PARK'
-        # Add other mappings if necessary
-    }
-    df['phase_key'] = df['phase_name'].map(phase_mapping).fillna(df['phase_name'])
-    
-    # Calculate points - first create empty columns
-    df['auto_points'] = 0.0
-    df['teleop_points'] = 0.0
-    
-    # Vectorize operations where possible instead of looping
-    for phase, points in POINTS_MAP.items():
-        mask = df['phase_key'] == phase
-        df.loc[mask, 'auto_points'] = df.loc[mask, 'completed_autonomous'] * points['auto']
-        df.loc[mask, 'teleop_points'] = df.loc[mask, 'completed_teleop'] * points['teleop']
-    
-    # Calculate total points
-    df['total_points'] = df['auto_points'] + df['teleop_points']
-    
-    return df
-
-@st.cache_data(ttl=600)
-def calcular_rankings(df):
-    # Calculate team rankings
-    team_rankings = df.groupby('team').agg({
-        'auto_points': 'sum',
-        'teleop_points': 'sum',
-        'total_points': 'sum'
-    }).reset_index()
-    
-    team_rankings['rank'] = team_rankings['total_points'].rank(ascending=False, method='min').astype(int)
-    team_rankings = team_rankings.sort_values('rank')
-    
-    # Calculate challenge-specific rankings
-    challenge_rankings = df.groupby(['team', 'challenge_name']).agg({
-        'auto_points': 'sum',
-        'teleop_points': 'sum', 
-        'total_points': 'sum'
-    }).reset_index()
-    
-    return team_rankings, challenge_rankings
-
-@st.cache_data(ttl=600)
-def construir_alianca_otima(team_rankings, challenge_rankings, df_processed, tamanho_alianca=3, max_teams=30):
-    """Optimized alliance builder that considers phase-specific performance within challenges"""
-    start_time = time.time()
-    
-    # Limit to top teams for better performance
-    top_teams = team_rankings.sort_values('total_points', ascending=False).head(max_teams)['team'].tolist()
-    available_teams = set(top_teams)
-    
-    aliances = []
-    
-    # Create phase-level performance data with challenge context
-    phase_performance = df_processed[df_processed['team'].isin(top_teams)].groupby(
-        ['team', 'challenge_name', 'phase_name']
-    ).agg({
-        'total_points': 'sum',
-        'completed_autonomous': 'sum',
-        'completed_teleop': 'sum'
-    }).reset_index()
-    
-    # Create a dictionary to store best phases for each team in each challenge
-    team_challenge_phases = {}
-    for team in top_teams:
-        team_data = phase_performance[phase_performance['team'] == team]
-        team_challenge_phases[team] = {}
-        
-        # Group by challenge to find best phases within each challenge
-        for challenge in team_data['challenge_name'].unique():
-            challenge_phases = team_data[team_data['challenge_name'] == challenge]
-            # Sort phases by total points to get best performing phases
-            best_phases = challenge_phases.sort_values('total_points', ascending=False)
-            team_challenge_phases[team][challenge] = {
-                'phases': [
-                    {
-                        'name': row['phase_name'],
-                        'points': row['total_points'],
-                        'completions': row['completed_autonomous'] + row['completed_teleop']
-                    }
-                    for _, row in best_phases.iterrows()
-                ]
-            }
-    
-    def calculate_alliance_synergy(current_alliance, candidate):
-        """Calculate how well a candidate complements the current alliance based on phase-specific strengths"""
-        if not current_alliance:
-            # For first team, consider their overall phase coverage
-            candidate_phases = team_challenge_phases[candidate]
-            total_score = 0
-            for challenge, data in candidate_phases.items():
-                if data['phases']:
-                    # Consider their best phase in each challenge
-                    total_score += max(phase['points'] for phase in data['phases'])
-            return total_score
-        
-        # Get current alliance's best phases for each challenge
-        alliance_coverage = {}
-        for team in current_alliance:
-            team_phases = team_challenge_phases[team]
-            for challenge, data in team_phases.items():
-                if challenge not in alliance_coverage:
-                    alliance_coverage[challenge] = {'covered_phases': set(), 'max_points': {}}
-                
-                for phase in data['phases']:
-                    phase_name = phase['name']
-                    alliance_coverage[challenge]['covered_phases'].add(phase_name)
-                    current_max = alliance_coverage[challenge]['max_points'].get(phase_name, 0)
-                    alliance_coverage[challenge]['max_points'][phase_name] = max(current_max, phase['points'])
-        
-        # Calculate how well candidate complements the alliance
-        synergy_score = 0
-        candidate_phases = team_challenge_phases[candidate]
-        
-        for challenge, data in candidate_phases.items():
-            if not data['phases']:
-                continue
-                
-            # Check each phase the candidate is good at
-            for phase in data['phases']:
-                phase_name = phase['name']
-                phase_points = phase['points']
-                
-                if challenge not in alliance_coverage:
-                    # Candidate brings entirely new challenge capability
-                    synergy_score += phase_points * 1.5  # Bonus for new challenge coverage
-                elif phase_name not in alliance_coverage[challenge]['covered_phases']:
-                    # Candidate brings new phase capability
-                    synergy_score += phase_points * 1.2  # Bonus for new phase coverage
-                else:
-                    # Check if candidate significantly improves existing phase coverage
-                    current_max = alliance_coverage[challenge]['max_points'].get(phase_name, 0)
-                    if phase_points > current_max:
-                        synergy_score += (phase_points - current_max)  # Value of improvement
-        
-        return synergy_score
-    
-    # Build alliances with improved phase-specific synergy calculation
-    for seed_team in top_teams[:10]:  # Use top 10 teams as seeds
-        if seed_team not in available_teams:
-            continue
-        
-        alliance = [seed_team]
-        available_teams.remove(seed_team)
-        
-        # Find complementary teams based on phase-specific strengths
-        while len(alliance) < tamanho_alianca and available_teams:
-            best_synergy = -1
-            best_team = None
-            
-            for candidate in available_teams:
-                synergy = calculate_alliance_synergy(alliance, candidate)
-                if synergy > best_synergy:
-                    best_synergy = synergy
-                    best_team = candidate
-            
-            if best_team:
-                alliance.append(best_team)
-                available_teams.remove(best_team)
-            else:
-                break
-        
-        # Calculate alliance metrics
-        alliance_total_points = sum(team_rankings[team_rankings['team'].isin(alliance)]['total_points'])
-        
-        # Calculate phase coverage for visualization
-        alliance_phase_coverage = phase_performance[
-            phase_performance['team'].isin(alliance)
-        ].groupby(['challenge_name', 'phase_name']).agg({
-            'total_points': 'sum'
-        }).reset_index()
-        
-        # Calculate balance score based on phase coverage
-        phase_balance = alliance_phase_coverage['total_points'].std() / alliance_phase_coverage['total_points'].mean() if len(alliance_phase_coverage) > 0 else 1
-        
-        aliances.append({
-            'teams': alliance,
-            'total_points': alliance_total_points,
-            'balance_score': 1 / (1 + phase_balance),  # Higher is better
-            'phase_coverage': alliance_phase_coverage
-        })
-    
-    # Sort alliances by a combination of total points and phase balance
-    aliances.sort(key=lambda x: (x['total_points'] * x['balance_score']), reverse=True)
-    
-    print(f"Alliance builder ran in {time.time() - start_time:.2f} seconds")
-    
-    return aliances
 
 # Add this helper function for CSV export
 def convert_df_to_csv(df):
@@ -286,7 +97,6 @@ def main():
 # Load data
     with st.spinner("Carregando dados..."):
         df = carregar_dados()
-        # df = processar_dados(df)
 
     # Criar score geral
     with st.spinner("Calculando ranking técnico..."):
@@ -302,11 +112,22 @@ def main():
         df = df.sort_values("overall_score", ascending=False)
         df["rank"] = range(1, len(df) + 1)
 
-    tab1, tab2, tab3, tab4 = st.tabs(
-        ["📊 Ranking Técnico", "🏆 Desafios", "🤖 Alianças", "🔍 Estatísticas de Robôs"]
-    )
 
-    with tab1:
+        tabs = [
+                "📊 Ranking Técnico",
+                "🏆 Desafios",
+                "🤖 Alianças",
+                "🔍 Estatísticas de Robôs"
+        ]
+
+        selected_tab = st.radio(
+                "Navegação",
+                tabs,
+                horizontal=True,
+                label_visibility="collapsed"
+        )
+
+    if selected_tab == "📊 Ranking Técnico":
         st.header("📊 Ranking Técnico das Equipes")
 
         # ===== CARDS SUPERIORES =====
@@ -348,7 +169,7 @@ def main():
                 "Autônomo",
                 "Rampa"
             ]],
-            use_container_width=True
+            width="stretch"
         )
         
         st.download_button(
@@ -370,9 +191,10 @@ def main():
             labels={"team": "Equipe", "overall_score": "Score Geral"}
         )
 
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width="stretch")
         
-    with tab2:
+    if selected_tab == "🏆 Desafios":
+            
             st.header("🏆 Análise por Desafio Técnico")
 
             desafio = st.selectbox(
@@ -408,7 +230,7 @@ def main():
             metric_column: "Valor"
         })
 
-            st.dataframe(display_df, use_container_width=True)
+            st.dataframe(display_df, width="stretch")
             st.subheader("Top 5 Equipes")
 
             top5 = ranking.head(5)
@@ -422,7 +244,7 @@ def main():
                 labels={"team": "Equipe", metric_column: "Valor"}
             )
 
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, width="stretch")
             
             st.subheader("Comparativo Completo - Top 3")
 
@@ -464,9 +286,10 @@ def main():
                 title="Perfil Técnico Comparativo"
             )
 
-            st.plotly_chart(radar_fig, use_container_width=True)
+            st.plotly_chart(radar_fig, width="stretch")
                 
-    with tab3:
+    if selected_tab == "🤖 Alianças":
+            
             st.header("Alianças Sugeridas")
             
             # Alliance configuration - removed slider and fixed alliance size to 3
@@ -565,206 +388,8 @@ def main():
                 explanation = "Como o robô selecionado é forte no Autônomo, foram adicionados um Scorer e um Defensor para complementar a estratégia."
 
             st.markdown(explanation)
-            
-            
-            # # Only do expensive calculations if a team is selected
-            # if selected_team:
-            #     with st.spinner("Calculando alianças otimizadas..."):
                     
-                        
-            #         # Get team's challenge performance
-            #         team_challenge_points = df[df["team"] == selected_team][['reliability', 'scoring_capacity', 'speed', 'defense', 'auto_efficiency']].mean()
-
-            #         # Simpler version - just get best/worst challenges without phase detail
-            #         best_challenges = team_challenge_points[team_challenge_points > 3].head(2)
-            #         worst_challenges = team_challenge_points[team_challenge_points <= 3].head(2)
-                    
-
-            #         st.write("### Perfil de Desempenho")
-            #         cols = st.columns(2)
-            #         with cols[0]:
-            #             st.write("**Pontos Fortes:**")
-            #             for note, value in best_challenges.items():
-            #                  st.write(f"🔥 {note}: {value:.2f}")
-                    
-            #         with cols[1]:
-            #             st.write("**Pontos Fracos:**")
-            #             for note, value in worst_challenges.items():
-            #                  st.write(f"🔥 {note}: {value:.2f}")
-                                                
-            #         # Simplified alliance building logic
-            #         # Start with the selected team
-            #         alliance = [selected_team]
-                    
-            #         # For each weak challenge, find a strong team
-            #         for _, challenge_row in worst_challenges.iterrows():
-            #             if len(alliance) >= alliance_size:
-            #                 break
-                            
-            #             challenge = challenge_row['challenge_name']
-                        
-            #             # Find strong teams in this challenge
-            #             strong_teams = challenge_rankings[
-            #                 (challenge_rankings['challenge_name'] == challenge) & 
-            #                 ~(challenge_rankings['team'].isin(alliance))
-            #             ].sort_values('total_points', ascending=False).head(5)  # Limit to top 5
-                        
-            #             if not strong_teams.empty:
-            #                 best_team = strong_teams.iloc[0]['team']
-            #                 alliance.append(best_team)
-                    
-            #         # If alliance still not complete, add highest scoring available teams
-            #         while len(alliance) < alliance_size:
-            #             remaining = team_rankings[
-            #                 ~team_rankings['team'].isin(alliance)
-            #             ].sort_values('total_points', ascending=False).head(5)  # Limit to top 5
-                        
-            #             if remaining.empty:
-            #                 break
-                            
-            #             alliance.append(remaining.iloc[0]['team'])
-                    
-            #         # Calculate alliance total points
-            #         alliance_points = team_rankings[team_rankings['team'].isin(alliance)]['total_points'].sum()
-                    
-            #         st.subheader(f"Aliança Complementar com {selected_team}")
-                    
-            #         # Show teams in horizontal columns
-            #         team_cols = st.columns(len(alliance))
-            #         for j, team in enumerate(alliance):
-            #             with team_cols[j]:
-            #                 team_data = team_rankings[team_rankings['team'] == team].iloc[0]
-                            
-            #                 # Display team name and rank
-            #                 st.metric(
-            #                     f"Equipe {j+1}", 
-            #                     team, 
-            #                     f"Rank: {int(team_data['rank'])}"
-            #                 )
-                            
-            #                 # Get team's best challenge and phases
-            #                 team_phases = df[df['team'] == team].groupby(
-            #                     ['challenge_name', 'phase_name']
-            #                 ).agg({
-            #                     'total_points': 'sum'
-            #                 }).reset_index()
-                            
-            #                 if not team_phases.empty:
-            #                     # Group by challenge first to find best challenge
-            #                     challenge_totals = team_phases.groupby('challenge_name')['total_points'].sum().reset_index()
-            #                     best_challenge = challenge_totals.loc[challenge_totals['total_points'].idxmax()]
-                                
-            #                     # Find best phase within best challenge
-            #                     best_phase = team_phases[
-            #                         team_phases['challenge_name'] == best_challenge['challenge_name']
-            #                     ].sort_values('total_points', ascending=False).iloc[0]
-                                
-            #                     st.markdown(f"""
-            #                     **Melhor Desafio:** {best_challenge['challenge_name']}
-            #                     - *Melhor Fase:* {best_phase['phase_name']}
-            #                     - *Pontos:* {int(best_phase['total_points'])}
-            #                     """)
-                    
-            #         # Show total alliance points
-            #         st.metric("Pontuação Total da Aliança", f"{int(alliance_points)} pontos")
-                    
-            #         # Simplified challenge coverage visualization
-            #         st.subheader("Cobertura de Desafios da Aliança")
-            #         alliance_by_challenge = challenge_rankings[
-            #             challenge_rankings['team'].isin(alliance)
-            #         ].groupby('challenge_name').agg({
-            #             'total_points': 'sum'
-            #         }).reset_index()
-                    
-            #         # Use simpler bar chart instead of radar chart
-            #         fig = px.bar(
-            #             alliance_by_challenge.sort_values('total_points', ascending=False),
-            #             x='challenge_name',
-            #             y='total_points',
-            #             title="Pontuação por Desafio",
-            #             labels={'challenge_name': 'Desafio', 'total_points': 'Pontos Totais'}
-            #         )
-            #         st.plotly_chart(fig, use_container_width=True)
-            
-            # else:
-            #     # Show a maximum of 3 pre-computed alliances to avoid performance issues
-            #     with st.spinner("Calculando melhores alianças..."):
-            #         alliances = construir_alianca_otima(team_rankings, challenge_rankings, df, alliance_size, max_teams=20)
-                    
-            #         st.subheader(f"Melhores Alianças Complementares (Tamanho: {alliance_size})")
-                    
-            #         # Only show top 3 alliances
-            #         for i, alliance in enumerate(alliances[:3]):
-            #             st.markdown(f"### Aliança {i+1} - {int(alliance['total_points'])} pontos")
-                        
-            #             # Show teams in horizontal columns
-            #             team_cols = st.columns(len(alliance['teams']))
-            #             for j, team in enumerate(alliance['teams']):
-            #                 with team_cols[j]:
-            #                     team_data = team_rankings[team_rankings['team'] == team].iloc[0]
-                                
-            #                     # Display team name and rank
-            #                     st.metric(
-            #                         f"Equipe {j+1}", 
-            #                         team, 
-            #                         f"Rank: {int(team_data['rank'])}"
-            #                     )
-                                
-            #                     # Get team's best challenge and phases
-            #                     team_phases = df[df['team'] == team].groupby(
-            #                         ['challenge_name', 'phase_name']
-            #                     ).agg({
-            #                         'total_points': 'sum'
-            #                     }).reset_index()
-                                
-            #                     if not team_phases.empty:
-            #                         # Group by challenge first to find best challenge
-            #                         challenge_totals = team_phases.groupby('challenge_name')['total_points'].sum().reset_index()
-            #                         best_challenge = challenge_totals.loc[challenge_totals['total_points'].idxmax()]
-                                    
-            #                         # Find best phase within best challenge
-            #                         best_phase = team_phases[
-            #                             team_phases['challenge_name'] == best_challenge['challenge_name']
-            #                         ].sort_values('total_points', ascending=False).iloc[0]
-                                    
-            #                         st.markdown(f"""
-            #                         **Melhor Desafio:** {best_challenge['challenge_name']}
-            #                         - *Melhor Fase:* {best_phase['phase_name']}
-            #                         - *Pontos:* {int(best_phase['total_points'])}
-            #                         """)
-                        
-            #             # Show phase coverage visualization
-            #             if 'phase_coverage' in alliance and not alliance['phase_coverage'].empty:
-            #                 st.subheader("Cobertura de Fases da Aliança")
-                            
-            #                 # Create a more detailed visualization showing phases within challenges
-            #                 coverage_data = alliance['phase_coverage'].sort_values(['challenge_name', 'total_points'], ascending=[True, False])
-                            
-            #                 fig = px.bar(
-            #                     coverage_data,
-            #                     x='phase_name',
-            #                     y='total_points',
-            #                     color='challenge_name',
-            #                     title="Pontuação por Fase em cada Desafio",
-            #                     labels={
-            #                         'phase_name': 'Fase',
-            #                         'total_points': 'Pontos Totais',
-            #                         'challenge_name': 'Desafio'
-            #                     },
-            #                     barmode='group'
-            #                 )
-                            
-            #                 fig.update_layout(
-            #                     xaxis_title="Fases",
-            #                     yaxis_title="Pontos",
-            #                     legend_title="Desafios"
-            #                 )
-                            
-            #                 st.plotly_chart(fig, use_container_width=True)
-                        
-            #                 st.markdown("---")  # Add a separator between alliances
-        
-    with tab4:        
+    if selected_tab == "🔍 Estatísticas de Robôs":
         st.header("🤖 Perfil do Robô")
 
         robots = sorted(df["team"].unique())
@@ -800,6 +425,25 @@ def main():
                 # Radar comparativo
                 radar_fig = go.Figure()
 
+                metric_cols = [
+                    "reliability",
+                    "scoring_capacity",
+                    "speed",
+                    "defense",
+                    "auto_efficiency",
+                    "ramp_rate"
+                ]
+
+                metric_labels = [
+                    "Confiabilidade",
+                    "Capacidade de Pontuar",
+                    "Velocidade",
+                    "Defesa",
+                    "Autônomo",
+                    "Rampa"
+                ]
+
+
                 for _, row in compare_data.iterrows():
                     radar_fig.add_trace(go.Scatterpolar(
                         r=[row[col] for col in metric_cols],
@@ -814,7 +458,7 @@ def main():
                     showlegend=True
                 )
 
-                st.plotly_chart(radar_fig, use_container_width=True)
+                st.plotly_chart(radar_fig, width="stretch")
 
 if __name__ == "__main__":
     main()
