@@ -1,5 +1,5 @@
 import streamlit as st
-import pandas as pd
+# import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 import io
@@ -57,19 +57,6 @@ def carregar_dados():
 
     return df
     
-@st.cache_data(ttl=600)    
-def carregarClimb_dados():
-    conn = conectar_ao_banco()
-    
-    query = ""
-    
-    df = pd.read_sql_query(query, conn)
-    
-    
-    return df
-    
-
-
 # Add this helper function for CSV export
 def convert_df_to_csv(df):
     """Converts a DataFrame to a CSV string for download."""
