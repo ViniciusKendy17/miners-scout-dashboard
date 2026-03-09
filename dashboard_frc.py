@@ -1,10 +1,8 @@
 import streamlit as st
 import pandas as pd
-import psycopg2 as pg
 import plotly.express as px
 import plotly.graph_objects as go
 import io
-import time
 import plotly.graph_objects as go
 from sqlalchemy import create_engine
 
@@ -34,14 +32,6 @@ POINTS_MAP = {
 
 
 def conectar_ao_banco():
-
-    # return pg.connect(
-    #     host=st.secrets["DB_HOST"],
-    #     user=st.secrets["DB_USER"],
-    #     password=st.secrets["DB_PASSWORD"],
-    #     database=st.secrets["DB_NAME"],
-    #     port=st.secrets["DB_PORT"]
-    # )
 
     return create_engine(
         f"postgresql+psycopg2://{st.secrets['DB_USER']}:{st.secrets['DB_PASSWORD']}@"
