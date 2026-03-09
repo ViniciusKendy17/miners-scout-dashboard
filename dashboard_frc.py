@@ -4,7 +4,6 @@ import plotly.express as px
 import plotly.graph_objects as go
 import io
 import plotly.graph_objects as go
-from sqlalchemy import create_engine
 
 
 
@@ -33,10 +32,7 @@ POINTS_MAP = {
 
 def conectar_ao_banco():
 
-    return create_engine(
-        f"postgresql+psycopg2://{st.secrets['DB_USER']}:{st.secrets['DB_PASSWORD']}@"
-        f"{st.secrets['DB_HOST']}:{st.secrets['DB_PORT']}/{st.secrets['DB_NAME']}"
-    )
+    return st.connection("postgresql", type="sql")
 
 @st.cache_data(ttl=600)  # Increase cache time to 10 minutes
 def carregar_dados():
@@ -53,11 +49,11 @@ def carregar_dados():
          BOOL_OR(s.ramp) as ramp_rate
         FROM robot_match_scout_tb s
         JOIN robots_tb r ON s.robot_id = r.id
-        GROUP BY r.team, s.ramp
+        GROUP BY r.team
         """
 
     # Load data into DataFrame
-    df = pd.read_sql_query(query, conn)
+    df = conn.query(query, ttl="10m")
 
     return df
     
