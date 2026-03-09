@@ -331,11 +331,11 @@ def main():
                     role_attr = team_data[main_attributes].idxmax()
                     
                     if role_attr == "scoring_capacity":
-                        role_name = "🔥 Scorer"
+                        role_name = "Scorer"
                     elif role_attr == "defense":
-                        role_name = "🛡 Defender"
+                        role_name = "Defender"
                     else:
-                        role_name = "🤖 Auto Specialist"
+                        role_name = "Auto Specialist"
 
                     st.metric(
                         f"Equipe {j+1}",
@@ -349,18 +349,6 @@ def main():
                     **Auto:** {team_data['auto_efficiency']:.2f}
                     """)
                     
-                    
-                    
-            st.subheader("Recomendação Estratégica")
-
-            if primary_role == "defense":
-                explanation = "Como o robô selecionado atua principalmente como Defensor, foram adicionados um Scorer forte e um especialista em Autônomo para equilibrar a aliança."
-            elif primary_role == "scoring_capacity":
-                explanation = "Como o robô selecionado é o principal Scorer, foram adicionados um Defensor forte e um especialista em Autônomo para balancear a composição."
-            else:
-                explanation = "Como o robô selecionado é forte no Autônomo, foram adicionados um Scorer e um Defensor para complementar a estratégia."
-
-            st.markdown(explanation)
                     
     if selected_tab == "🔍 Estatísticas de Robôs":
         st.header("🤖 Perfil do Robô")
