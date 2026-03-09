@@ -60,10 +60,10 @@ def carregar_dados():
         AVG(s.speed) as speed,
         AVG(s.defense) as defense,
         AVG(s.auto_efficiency) as auto_efficiency,
-        AVG(CASE WHEN s.ramp THEN 1 ELSE 0 END) as ramp_rate
+         BOOL_OR(s.ramp) as ramp_rate
         FROM robot_match_scout_tb s
         JOIN robots_tb r ON s.robot_id = r.id
-        GROUP BY r.team
+        GROUP BY r.team, s.ramp
         """
 
     # Load data into DataFrame
@@ -106,7 +106,7 @@ def main():
             df["speed"] * 0.15 +
             df["defense"] * 0.15 +
             df["auto_efficiency"] * 0.15 +
-            df["ramp_rate"] * 0
+            df["ramp_rate"] 
         )
 
         df = df.sort_values("overall_score", ascending=False)
@@ -407,10 +407,6 @@ def main():
 
             with col2:
                 st.metric("Score Geral", f"{robot_data['overall_score']:.2f}")
-
-            with col3:
-                st.metric("Confiabilidade", f"{robot_data['reliability']:.2f}")
-                
             
             st.subheader("Comparar Robôs")
 
