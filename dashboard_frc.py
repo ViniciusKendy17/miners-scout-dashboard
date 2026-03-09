@@ -142,7 +142,7 @@ def main():
                 "Autônomo",
                 "Rampa"
             ]],
-            width="stretch"
+            use_container_width=True
         )
         
         st.download_button(
@@ -164,7 +164,7 @@ def main():
             labels={"team": "Equipe", "overall_score": "Score Geral"}
         )
 
-        st.plotly_chart(fig, width="stretch")
+        st.plotly_chart(fig, use_container_width=True)
         
     if selected_tab == "🏆 Desafios":
             
@@ -203,7 +203,7 @@ def main():
             metric_column: "Valor"
         })
 
-            st.dataframe(display_df, width="stretch")
+            st.dataframe(display_df, use_container_width=True)
             st.subheader("Top 5 Equipes")
 
             top5 = ranking.head(5)
@@ -217,7 +217,7 @@ def main():
                 labels={"team": "Equipe", metric_column: "Valor"}
             )
 
-            st.plotly_chart(fig, width="stretch")
+            st.plotly_chart(fig, use_container_width=True)
             
             st.subheader("Comparativo Completo - Top 3")
 
@@ -259,7 +259,7 @@ def main():
                 title="Perfil Técnico Comparativo"
             )
 
-            st.plotly_chart(radar_fig, width="stretch")
+            st.plotly_chart(radar_fig, use_container_width=True)
                 
     if selected_tab == "🤖 Alianças":
             
@@ -427,7 +427,7 @@ def main():
                     showlegend=True
                 )
 
-                st.plotly_chart(radar_fig, width="stretch")
+                st.plotly_chart(radar_fig, use_container_width=True)
 
 if __name__ == "__main__":
     main()
