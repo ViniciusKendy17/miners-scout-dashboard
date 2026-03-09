@@ -34,7 +34,7 @@ def conectar_ao_banco():
 
     return st.connection("postgresql", type="sql")
 
-@st.cache_data(ttl=300)  # Increase cache time to 10 minutes
+@st.cache_data(ttl=15)  # Increase cache time to 10 minutes
 def carregar_dados():
     conn = conectar_ao_banco()
 
@@ -53,7 +53,7 @@ def carregar_dados():
         """
 
     # Load data into DataFrame
-    df = conn.query(query, ttl=None)
+    df = conn.query(query)
 
     return df
     
