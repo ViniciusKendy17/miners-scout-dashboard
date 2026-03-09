@@ -34,7 +34,7 @@ POINTS_MAP = {
 def conectar_ao_banco():
 
     return create_engine(
-        f"postgresql+psycopg://{st.secrets['DB_USER']}:{st.secrets['DB_PASSWORD']}@"
+        f"postgresql+psycopg2://{st.secrets['DB_USER']}:{st.secrets['DB_PASSWORD']}@"
         f"{st.secrets['DB_HOST']}:{st.secrets['DB_PORT']}/{st.secrets['DB_NAME']}"
     )
 
